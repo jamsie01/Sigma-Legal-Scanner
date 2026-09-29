@@ -1,2 +1,4 @@
 # Sigma-Legal-Scanner
-Sigma Legal Search — Lightweight London vacancy scanner across 20 official law firm career boards
+
+A Python tool that checks official law-firm careers boards for qualified-lawyer vacancies, particularly London roles.
+Covers 20 official law firm careers boards.
