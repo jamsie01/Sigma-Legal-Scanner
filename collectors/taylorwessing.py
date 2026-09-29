@@ -1,26 +1,20 @@
-"""Collector for Taylor Wessing (Winston Taylor EMEA careers board)."""
+"""Collector for Winston Taylor (formerly Taylor Wessing UK/EMEA — merged with
+Winston & Strawn on 1 June 2026).  The official ATS is SuccessFactors at
+careers.winstontaylor-emea.com, linked from winstontaylor.com/careers."""
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import HttpClient, FetchError
 from models import ScanResult, Vacancy, utc_now
 
-LAWYER_TITLES = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT_ROLES = re.compile(r'\b(paralegal|secretar\w*|admin\w*|it|hr|marketing|assistant|coordinator|manager|specialist|advisor|analyst|engineer|developer|accountant|supervisor|trainee|training contract|open day|vacation scheme)\b', re.I)
 PQE_PATTERN = re.compile(r'\bPQE\b|post[\s-]+qualifi(?:cation|ed)|years?[\'\s]+experience', re.I)
 
 @dataclass(frozen=True)
 class TaylorWessingConfig:
     firm: str = 'Taylor Wessing'
     board_url: str = 'https://careers.winstontaylor-emea.com/Careeropportunities/go/Career-opportunities/9053755/'
-
-
-def is_lawyer(title: str) -> bool:
-    if SUPPORT_ROLES.search(title):
-        if not re.search(r'\b(?:solicitor|lawyer|associate|partner|legal director)\b', title, re.I):
-            return False
-    return bool(LAWYER_TITLES.search(title))
 
 
 def is_london(location: str) -> bool:
@@ -66,9 +60,11 @@ class TaylorWessingCollector:
                 href = links[0].attrs.get('href', '')
                 url = urljoin(self.config.board_url, href)
                 
+                # Extract location from the table cells
                 tds = [td.text().strip() for td in tr.find('td') if td.text().strip()]
                 loc = tds[-1] if tds else ''
                 
+                # Job ID from URL (e.g. /1369209055/)
                 id_m = re.search(r'/(\d+)/?$', href)
                 job_id = id_m.group(1) if id_m else href.split('/')[-2]
                 
@@ -89,7 +85,7 @@ class TaylorWessingCollector:
             job_id = card['job_id']
             summary = dict(card)
 
-            if not is_lawyer(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({**summary, 'reason': 'Support or non-qualified role'})
                 continue
 

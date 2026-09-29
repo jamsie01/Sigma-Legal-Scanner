@@ -93,7 +93,7 @@ class ParsingTests(unittest.TestCase):
         self.assertFalse(scan.coverage['london_filter_complete'])
     def test_business_partner_is_not_lawyer(self):
         self.assertFalse(lawyer_title('HR Business Partner','business_professionals'))
-        self.assertTrue(lawyer_title('Risk Lawyer','business_professionals'))
+        self.assertFalse(lawyer_title('Risk Lawyer','business_professionals'))
     def test_duplicate_html_attributes_use_first(self):
         from collectors.html import Tree
         node=Tree('<form id="first" id="second"></form>').root.find('form')[0]

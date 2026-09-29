@@ -67,6 +67,7 @@ def write_csv(path, records):
         writer = csv.DictWriter(handle, fields, extrasaction='ignore')
         writer.writeheader()
         for record in records:
+            # Preserve source text in JSON/SQLite; protect spreadsheet cells.
             writer.writerow({key: ("'" + value if isinstance(value, str)
                                    and value.startswith(('=', '+', '-', '@')) else value)
                              for key, value in record.items()})

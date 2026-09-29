@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -11,16 +12,8 @@ class StewartsConfig:
     board_url: str
 
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin|it|marketing|hr|assistant|trainee|apprentice)\b', re.I)
-
-
 def is_london(location):
     return bool(re.search(r'\bLondon\b', location, re.I))
-
-
-def is_lawyer(title):
-    return bool(LAWYER.search(title)) and not bool(SUPPORT.search(title))
 
 
 class StewartsCollector:
@@ -50,6 +43,7 @@ class StewartsCollector:
                         continue
                         
                     text = li.text()
+                    # Strip 'Job Description' or 'job description'
                     text = re.sub(r'job description\s*$', '', text, flags=re.IGNORECASE).strip()
                     text = text.strip('-').strip('–').strip()
                     
@@ -64,7 +58,7 @@ class StewartsCollector:
                         category = 'Unknown'
                     else:
                         title = text
-                        location = 'Unknown'
+                        location = 'London' if is_london(text) else 'Unknown'
                         category = 'Unknown'
                         
                     job_id = href.split('/')[-1].replace('.pdf', '')
@@ -83,7 +77,7 @@ class StewartsCollector:
             url = card['url']
             location = card['location']
             
-            if not is_lawyer(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({'job_id': job_id, 'title': title, 'url': url, 'reason': 'Not a qualified lawyer role'})
                 continue
                 
@@ -96,7 +90,7 @@ class StewartsCollector:
                 url=url,
                 practice_area=card['category'],
                 practice_area_source='List item category',
-                pqe=None,
+                pqe=None, # PDFs not parsed yet
                 checked_at=utc_now(),
                 london=is_london(location),
                 category=card['category'],
