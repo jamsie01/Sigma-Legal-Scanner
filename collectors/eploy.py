@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree, text_field
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -14,16 +15,8 @@ class EployConfig:
     max_pages: int = 20
 
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin|it|marketing|hr|assistant|trainee|apprentice)\b', re.I)
-
-
 def is_london(location):
     return bool(re.search(r'\bLondon\b', location, re.I))
-
-
-def is_lawyer(title):
-    return bool(LAWYER.search(title)) and not bool(SUPPORT.search(title))
 
 
 def extract_pqe(description):
@@ -58,6 +51,8 @@ class EployCollector:
                 pages_visited += 1
                 root = Tree(html).root
                 
+                # Eploy often uses article or div.vacancy-item, but prompt says:
+                # "Server-rendered HTML, links to /Jobs/Advert/ pages"
                 job_links = []
                 for a in root.find('a'):
                     href = a.attrs.get('href', '')
@@ -92,10 +87,12 @@ class EployCollector:
                 title_node = root.find('h1')
                 title = title_node[0].text() if title_node else ''
                 
+                # We need location, which is usually in a dt/dd pair or text.
+                # Let's just grab the whole text and look for London.
                 text = root.text()
                 location = "London" if is_london(text) else "Other"
                 
-                if not is_lawyer(title):
+                if not is_sigma_vacancy(title):
                     result.excluded.append({'job_id': job_id, 'title': title, 'url': url, 'reason': 'Not a qualified lawyer role'})
                     continue
                 
@@ -108,7 +105,7 @@ class EployCollector:
                     url=url,
                     practice_area=None,
                     practice_area_source=None,
-                    pqe=extract_pqe(html),
+                    pqe=extract_pqe(html), # html string for tree parser
                     checked_at=utc_now(),
                     london=is_london(location),
                     category='legal',

@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse, urlencode
+from collectors.classify import INTERNAL_ROLES, is_sigma_vacancy
 from collectors.html import Tree, text_field
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -38,8 +39,11 @@ def is_london(location):
 
 def lawyer_title(title, category):
     if category == 'business_professionals':
-        return bool(re.search(r'\b(solicitor|lawyer|legal counsel|barrister)\b', title, re.I))
-    return bool(LAWYER.search(title))
+        # HR Business Partner and Business Development Associate are not
+        # qualified-lawyer titles, even though they contain partner/associate.
+        if not bool(re.search(r'\b(solicitor|lawyer|legal counsel|barrister)\b', title, re.I)):
+            return False
+    return is_sigma_vacancy(title)
 
 
 def parse_board(html, url):
@@ -147,6 +151,8 @@ def parse_advert(html, card, firm):
     if qualification:
         evidence = plain[max(0, qualification.start()-45):qualification.end()+150]
     if not evidence:
+        # Optional admission does not turn a paralegal analyst vacancy into a
+        # qualified-lawyer vacancy. Keep evidence in the audit trail.
         optional = re.search(r'Admission as an attorney is an added advantage', plain, re.I)
         if optional:
             return None, 'exclude', optional.group(0)
@@ -234,6 +240,7 @@ class HarbourCollector:
                     result.errors.append('Official London filter and full-board locations disagree; board may have changed')
                 else:
                     london_complete = not london_errors and full_complete
+                # Preserve newly discovered filtered adverts even during board drift.
                 for key, card in london_cards.items():
                     cards.setdefault(key, card)
             except FetchError as exc:
@@ -247,6 +254,9 @@ class HarbourCollector:
                 continue
             if category == 'business_professionals' and not lawyer_title(title, category):
                 result.excluded.append({**summary, 'reason': 'Official business-professionals category, no lawyer title'})
+                continue
+            if INTERNAL_ROLES.search(title):
+                result.excluded.append({**summary, 'reason': 'Internal/non-fee-earning role (knowledge, compliance, risk, conflicts, OGC)'})
                 continue
             self.progress(f"Checking {card['job_id']}: {title}")
             try:

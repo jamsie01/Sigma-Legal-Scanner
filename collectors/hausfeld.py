@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -12,16 +13,8 @@ class HausfeldConfig:
     board_url: str
 
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin|it|marketing|hr|assistant|trainee|apprentice)\b', re.I)
-
-
 def is_london(location):
     return bool(re.search(r'\bLondon\b', location, re.I))
-
-
-def is_lawyer(title):
-    return bool(LAWYER.search(title)) and not bool(SUPPORT.search(title))
 
 
 def extract_pqe(description):
@@ -51,6 +44,7 @@ class HausfeldCollector:
             html = self.client.get(self.config.board_url)
             root = Tree(html).root
             
+            # Find elements with class job-listing__item
             for element in root.find(cls='job-listing__item'):
                 a_tags = element.find('a')
                 if not a_tags:
@@ -62,6 +56,7 @@ class HausfeldCollector:
                     
                 title = a_tags[0].text().strip()
                 if not title:
+                    # sometimes title is in an h2 or h3 inside
                     h2 = element.find('h2')
                     h3 = element.find('h3')
                     if h2:
@@ -85,7 +80,7 @@ class HausfeldCollector:
             title = card['title']
             url = card['url']
             
-            if not is_lawyer(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({'job_id': job_id, 'title': title, 'url': url, 'reason': 'Not a qualified lawyer role'})
                 continue
                 

@@ -3,25 +3,17 @@ import re
 import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import HttpClient, FetchError
 from models import ScanResult, Vacancy, utc_now
 
-LAWYER_TITLES = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT_ROLES = re.compile(r'\b(paralegal|secretar\w*|admin\w*|it|hr|marketing|assistant|coordinator|manager|specialist|advisor|analyst|engineer|developer|accountant|clerk|operator|reception\w*|trainee|training contract|open day|vacation scheme)\b', re.I)
 PQE_PATTERN = re.compile(r'\bPQE\b|post[\s-]+qualifi(?:cation|ed)|years?[\'\s]+experience', re.I)
 
 @dataclass(frozen=True)
 class CvmailConfig:
     firm: str
     board_url: str
-
-
-def is_lawyer(title: str) -> bool:
-    if SUPPORT_ROLES.search(title):
-        if not re.search(r'\b(?:solicitor|lawyer|associate|partner|legal director)\b', title, re.I):
-            return False
-    return bool(LAWYER_TITLES.search(title))
 
 
 def is_london(location: str) -> bool:
@@ -96,7 +88,7 @@ class CvmailCollector:
             job_id = card['job_id']
             summary = dict(card)
 
-            if not is_lawyer(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({**summary, 'reason': 'Support or non-qualified role'})
                 continue
 

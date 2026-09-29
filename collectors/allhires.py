@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 import time
 from dataclasses import dataclass
+from collectors.classify import is_sigma_vacancy
 from models import ScanResult, Vacancy, utc_now
 from collectors.html import Tree
 
@@ -12,8 +13,6 @@ class AllHiresConfig:
     firm: str
     base_url: str
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin\w*|it|hr|marketing|assistant|coordinator|manager|specialist|advisor|analyst|engineer|business development|operations?|finance|talent|recruitment|reception\w*|trainee|apprentice|scheme|intern|clerk)\b', re.I)
 PQE = re.compile(r'\bPQE\b|post[\s-]+qualifi(?:cation|ed)|years?[\'\s]+experience', re.I)
 
 class AllHiresCollector:
@@ -90,7 +89,7 @@ class AllHiresCollector:
             href = f"{self.config.base_url.rstrip('/')}/app/vacancies/{job_id}"
             summary = {'title': title, 'location': loc, 'job_id': job_id, 'url': href}
             
-            if SUPPORT.search(title) or not LAWYER.search(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({**summary, 'reason': 'Not a qualified lawyer title / support role'})
                 continue
                 
@@ -107,7 +106,9 @@ class AllHiresCollector:
                     text = s.get('SectionText') or ''
                     desc_text += f"{header}\n{text}\n"
                     
+                # strip html tags for clean PQE extraction
                 clean_desc = re.sub(r'<[^>]+>', ' ', desc_text)
+                
                 london = bool(re.search(r'\blondon\b', loc, re.I))
                 pqe_text = self.extract_pqe(clean_desc)
                 evidence = 'Qualified legal role title: ' + title

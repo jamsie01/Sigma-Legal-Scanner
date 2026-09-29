@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -12,16 +13,8 @@ class HfwConfig:
     board_url: str
 
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin|it|marketing|hr|assistant|trainee|apprentice)\b', re.I)
-
-
 def is_london(location):
     return bool(re.search(r'\bLondon\b', location, re.I))
-
-
-def is_lawyer(title):
-    return bool(LAWYER.search(title)) and not bool(SUPPORT.search(title))
 
 
 def extract_pqe(description):
@@ -83,7 +76,7 @@ class HfwCollector:
                 text = root.text()
                 location = "London" if is_london(text) else "Other"
                 
-                if not is_lawyer(title):
+                if not is_sigma_vacancy(title):
                     result.excluded.append({'job_id': job_id, 'title': title, 'url': url, 'reason': 'Not a qualified lawyer role'})
                     continue
                 

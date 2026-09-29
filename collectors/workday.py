@@ -5,6 +5,7 @@ import urllib.error
 import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
+from collectors.classify import is_sigma_vacancy
 from models import ScanResult, Vacancy, utc_now
 
 @dataclass(frozen=True)
@@ -13,14 +14,7 @@ class WorkdayConfig:
     base_url: str
     location_filter: str = None
 
-LAWYER_TITLES = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT_ROLES = re.compile(r'\b(paralegal|secretar\w*|admin\w*|it|hr|marketing|assistant|coordinator|manager|specialist|advisor|analyst|engineer|business development|operations?|finance|talent|recruitment|reception\w*)\b', re.I)
 PQE_PATTERN = re.compile(r'\bPQE\b|post[\s-]+qualifi(?:cation|ed)|years?[\'\s]+experience', re.I)
-
-def is_lawyer(title: str) -> bool:
-    if SUPPORT_ROLES.search(title):
-        return False
-    return bool(LAWYER_TITLES.search(title))
 
 def is_london(location: str, additional_locations: list) -> bool:
     locs = [location] + (additional_locations or [])
@@ -101,7 +95,7 @@ class WorkdayCollector:
                 'job_id': job_id_summary
             }
             
-            if not is_lawyer(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({**summary, 'reason': 'Not a qualified lawyer title / support role'})
                 continue
                 
@@ -120,6 +114,7 @@ class WorkdayCollector:
                 
                 london_status = is_london(loc, add_locs)
                 
+                # HTML tag stripping from description for pqe extraction and evidence matching
                 clean_desc = re.sub(r'<[^>]+>', ' ', desc)
                 pqe_text = extract_pqe(clean_desc)
                 evidence = 'Qualified legal role title: ' + title

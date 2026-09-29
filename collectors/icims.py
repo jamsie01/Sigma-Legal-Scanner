@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse, urlencode
+from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import FetchError
 from models import ScanResult, Vacancy, utc_now
@@ -10,8 +11,6 @@ class IcimsConfig:
     firm: str
     board_url: str
 
-LAWYER = re.compile(r'\b(solicitor|lawyer|associate|partner|legal director|counsel|barrister)\b', re.I)
-SUPPORT = re.compile(r'\b(paralegal|secretar\w*|admin\w*|it|hr|marketing|assistant|coordinator|manager|specialist|advisor|analyst|engineer|business development|operations?|finance|talent|recruitment|reception\w*|trainee|apprentice|scheme|intern|clerk)\b', re.I)
 PQE = re.compile(r'\bPQE\b|post[\s-]+qualifi(?:cation|ed)|years?[\'\s]+experience', re.I)
 
 class IcimsCollector:
@@ -36,6 +35,7 @@ class IcimsCollector:
         page = 0
         
         while True:
+            # iCIMS uses p param for pagination (sometimes 'pr') but let's just append or add if it exists
             url = self.config.board_url
             if '?' in url:
                 url += f"&pr={page}"
@@ -51,7 +51,7 @@ class IcimsCollector:
             root = Tree(html).root
             items = root.find(cls='iCIMS_JobCardItem')
             if not items:
-                items = root.find(cls='iCIMS_JobListingRow')
+                items = root.find(cls='iCIMS_JobListingRow') # Some icims use this class
                 
             if not items:
                 break
@@ -79,7 +79,7 @@ class IcimsCollector:
                 break
                 
             page += 1
-            if page > 20:
+            if page > 20: # safety limit
                 break
 
         full_complete = not result.errors
@@ -91,7 +91,7 @@ class IcimsCollector:
             loc = card['loc']
             summary = {'title': title, 'location': loc, 'job_id': job_id, 'url': href}
             
-            if SUPPORT.search(title) or not LAWYER.search(title):
+            if not is_sigma_vacancy(title):
                 result.excluded.append({**summary, 'reason': 'Not a qualified lawyer title / support role'})
                 continue
                 
