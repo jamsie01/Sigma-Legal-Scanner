@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 from collectors.classify import is_sigma_vacancy
 from collectors.html import Tree
 from collectors.http import FetchError
+from collectors.fields import explicit_location
 from models import ScanResult, Vacancy, utc_now
 
 @dataclass(frozen=True)
@@ -69,7 +70,10 @@ class HausfeldCollector:
                 
                 cards[job_id] = {'title': title, 'url': url}
             
-            result.coverage['board_pages'] = 1
+            board_verified = bool(cards or root.find(cls='section__title') or root.find(cls='job-listing__item') or 'OPEN POSITIONS' in root.text())
+            result.coverage.update(board_pages=1, board_vacancies=len(cards), board_complete=board_verified)
+            if not board_verified:
+                result.errors.append('No recognised vacancy cards or board structure; empty board not verified')
             
         except FetchError as e:
             result.errors.append(str(e))
@@ -90,7 +94,7 @@ class HausfeldCollector:
                 root = Tree(html).root
                 
                 text = root.text()
-                location = "London" if is_london(text) else "Other"
+                location = explicit_location(html)
                 
                 vacancy = Vacancy(
                     firm=self.config.firm,

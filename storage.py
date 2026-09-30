@@ -6,6 +6,14 @@ from pathlib import Path
 
 
 SCHEMA = '''
+CREATE TABLE IF NOT EXISTS decisions (
+ firm TEXT NOT NULL, job_id TEXT NOT NULL, reason TEXT NOT NULL, decided_at TEXT NOT NULL,
+ PRIMARY KEY (firm, job_id)
+);
+CREATE TABLE IF NOT EXISTS scan_metadata (
+ scan_id INTEGER PRIMARY KEY REFERENCES scans(id), source TEXT NOT NULL, baseline INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY, firm TEXT NOT NULL, started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL, status TEXT NOT NULL,
@@ -47,18 +55,30 @@ class Store:
         """Transaction serializes NEW checks even if two scans finish together."""
         try:
             self.db.execute('BEGIN IMMEDIATE')
+            baseline = self.db.execute('SELECT 1 FROM vacancies WHERE firm=? LIMIT 1', (result.firm,)).fetchone() is None
+            previous_scan = self.db.execute('SELECT id, status FROM scans WHERE firm=? ORDER BY id DESC LIMIT 1', (result.firm,)).fetchone()
             cursor = self.db.execute(
                 'INSERT INTO scans (firm,started_at,finished_at,status,coverage_json,errors_json,review_json,excluded_json) VALUES (?,?,?,?,?,?,?,?)',
                 (result.firm, result.started_at, result.finished_at, result.status,
                  json.dumps(result.coverage), json.dumps(result.errors),
                  json.dumps(result.review), json.dumps(result.excluded)))
             scan_id = cursor.lastrowid
+            self.db.execute('INSERT INTO scan_metadata VALUES (?,?,?)', (scan_id, result.source, baseline))
             records = []
             for vacancy in result.vacancies:
                 record = asdict(vacancy)
-                previous = self.db.execute('SELECT first_seen FROM vacancies WHERE firm=? AND job_id=?',
+                previous = self.db.execute('SELECT * FROM vacancies WHERE firm=? AND job_id=?',
                                            (vacancy.firm, vacancy.job_id)).fetchone()
                 is_new = previous is None
+                changed_fields = [key for key in ('title', 'location', 'url', 'practice_area', 'pqe')
+                                  if previous is not None and previous[key] != record[key]]
+                change = ('BASELINE' if baseline else 'NEW') if is_new else (
+                    'UPDATED' if changed_fields else
+                    'RETURNED' if previous_scan and previous_scan['status'] == 'SUCCESS' and previous['last_scan_id'] != previous_scan['id'] else 'SEEN')
+                report_record = {**record, 'is_new': is_new and not baseline, 'change': change,
+                                 'changed_fields': changed_fields, 'baseline': baseline,
+                                 'first_seen': vacancy.checked_at if is_new else previous['first_seen'],
+                                 'last_seen': vacancy.checked_at}
                 fields = list(record)
                 values = list(record.values())
                 assignments = ','.join(f'{key}=excluded.{key}' for key in fields if key not in ('firm', 'job_id'))
@@ -68,9 +88,8 @@ class Store:
                     f"ON CONFLICT(firm,job_id) DO UPDATE SET {assignments},last_seen=excluded.last_seen,last_scan_id=excluded.last_scan_id",
                     values + [vacancy.checked_at, vacancy.checked_at, scan_id, scan_id])
                 self.db.execute('INSERT INTO observations VALUES (?,?,?,?,?)',
-                                (scan_id, vacancy.firm, vacancy.job_id, is_new, json.dumps(record)))
-                records.append({**record, 'is_new': is_new,
-                                'first_seen': vacancy.checked_at if is_new else previous['first_seen']})
+                                (scan_id, vacancy.firm, vacancy.job_id, is_new, json.dumps(report_record)))
+                records.append({**report_record, 'is_new': is_new})
             self.db.commit()
             return scan_id, records
         except BaseException:
@@ -94,3 +113,39 @@ class Store:
             ORDER BY london DESC, firm ASC, title ASC
         ''')
         return [dict(row) for row in cursor.fetchall()]
+
+
+    def exclude(self, firm, job_id, reason):
+        from models import utc_now
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO decisions VALUES (?,?,?,?)',
+                            (firm, job_id, reason, utc_now()))
+
+    def restore(self, firm, job_id):
+        with self.db:
+            self.db.execute('DELETE FROM decisions WHERE firm=? AND job_id=?', (firm, job_id))
+
+    def decisions(self):
+        return [dict(r) for r in self.db.execute('SELECT * FROM decisions ORDER BY firm,job_id')]
+
+    def latest_scans(self):
+        rows = self.db.execute("""
+            SELECT s.*, m.source, m.baseline FROM scans s
+            LEFT JOIN scan_metadata m ON m.scan_id=s.id
+            WHERE s.id=(SELECT MAX(s2.id) FROM scans s2 WHERE s2.firm=s.firm)
+            ORDER BY s.firm
+        """)
+        results = []
+        for row in rows:
+            scan = dict(row)
+            for key in ('coverage', 'errors', 'review', 'excluded'):
+                scan[key] = json.loads(scan.pop(key + '_json'))
+            scan['vacancies'] = []
+            for obs in self.db.execute('SELECT payload_json,is_new FROM observations WHERE scan_id=?', (scan['id'],)):
+                record = json.loads(obs['payload_json'])
+                record.setdefault('change', 'LEGACY')
+                record.setdefault('is_new', False)
+                record.setdefault('first_seen', '')
+                scan['vacancies'].append(record)
+            results.append(scan)
+        return results

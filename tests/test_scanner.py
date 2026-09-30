@@ -159,5 +159,41 @@ class StorageTests(unittest.TestCase):
             self.store.save(result([sample(),sample()]))
         self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM scans').fetchone()[0],0)
         self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM vacancies').fetchone()[0],0)
+
+
+class ValidationTests(unittest.TestCase):
+    def test_validation_spa_shell_accepted(self):
+        from validation import validate_result
+        from registry import FIRMS
+        v = Vacancy('Lewis Silkin', '999', '999', 'Associate', 'London',
+                    'https://lewissilkin.allhires.com/app/vacancies/999', None, None,
+                    '2 PQE', utc_now(), True, 'AllHires', 'title match')
+        r = ScanResult('Lewis Silkin', 'https://lewissilkin.allhires.com/', vacancies=[v])
+        r.coverage['board_complete'] = True
+        class MockClient:
+            pages = {'https://lewissilkin.allhires.com/app/vacancies/999': '<div class="main-content-react"></div>'}
+            def get(self, url, **kwargs):
+                return self.pages.get(url, '')
+        class MockCollector:
+            client = MockClient()
+        validate_result(r, FIRMS['lewis-silkin'], MockCollector(), {})
+        self.assertEqual(r.status, 'SUCCESS')
+        self.assertEqual(len(r.vacancies), 1)
+        self.assertEqual(r.errors, [])
+
+    def test_validation_excludes_internal_roles(self):
+        from validation import validate_result
+        from registry import FIRMS
+        v = Vacancy('TLT', '998', 'TLT-998', 'Senior Risk Lawyer', 'London',
+                    URL + '998/senior_risk_lawyer', None, None, None, utc_now(), True, 'legal_careers', 'evidence')
+        r = ScanResult('TLT', URL, vacancies=[v])
+        r.coverage['board_complete'] = True
+        class MockCollector:
+            client = FakeClient({URL + '998/senior_risk_lawyer': 'Senior Risk Lawyer'})
+        validate_result(r, CONFIG, MockCollector(), {})
+        self.assertEqual(len(r.vacancies), 0)
+        self.assertEqual(len(r.excluded), 1)
+
+
 if __name__=='__main__':
     unittest.main()
